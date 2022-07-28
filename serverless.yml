@@ -1,0 +1,116 @@
+service: aws-recognition-api
+
+frameworkVersion: '3'
+
+custom:
+  domainName: ${opt:stage, self:provider.stage}.perfsys.cf
+  hosted_zonaID: "Z0836271TEULZNK0FS42"
+  ssl_arn: "arn:aws:acm:us-east-1:670726858704:certificate/c4651d62-e78e-4baf-a533-26bce68df147"
+
+provider:
+  name: aws
+  runtime: python3.8
+  stage: recognition-api-stage
+  region: us-east-1
+  environment:
+    TABLE_NAME: 'db-label-images'
+    BUCKET: 's3-for-images'
+    DNS_RECORD: !Join
+      - ""
+      - - "https://"
+        - ${self:custom.domainName}
+        - ""
+
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - s3:*
+          Resource: "arn:aws:s3:::${self:provider.environment.BUCKET}/*"
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/${self:provider.environment.TABLE_NAME}"
+        - Effect: "Allow"
+          Action:
+            - "rekognition:*"
+          Resource: "*"
+
+functions:
+  upload_object:
+    handler: scripts/upload-object.createBlob
+    events:
+      - http:
+          path: blobs
+          method: post
+          cors: true
+
+  processBlob:
+    handler: scripts/processBlob.labelOnS3Upload
+    events:
+      - s3:
+          bucket: !Ref BucketUpload
+          event: s3:ObjectCreated:*
+          existing: true
+
+  getLabelImages:
+    handler: scripts/getLabelImages.getImagesByLabel
+    events:
+      - http:
+          path: blobs/{blobs_id}
+          method: get
+          cors: true
+
+resources:
+  Resources:
+    BucketUpload:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.BUCKET}
+
+    DynamoDBTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.TABLE_NAME}
+        AttributeDefinitions:
+          - AttributeName: fileName
+            AttributeType: S
+        KeySchema:
+          - AttributeName: fileName
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+
+    myDomainName:
+      Type: 'AWS::ApiGateway::DomainName'
+      Properties:
+        CertificateArn: ${self:custom.ssl_arn}
+        DomainName: ${self:custom.domainName}
+
+    myMapping:
+      Type: 'AWS::ApiGateway::BasePathMapping'
+      DependsOn:
+        - myDomainName
+      Properties:
+        BasePath: ""
+        Stage: ${opt:stage, self:provider.stage}
+        DomainName: ${self:custom.domainName}
+        RestApiId: !Ref ApiGatewayRestApi
+
+    ApiRoute53Record:
+      Type: AWS::Route53::RecordSetGroup
+      Properties:
+        HostedZoneId: ${self:custom.hosted_zonaID}
+        RecordSets:
+          - Name: ${self:custom.domainName}
+            Type: A
+            AliasTarget:
+              HostedZoneId: !GetAtt myDomainName.DistributionHostedZoneId
+              DNSName: !GetAtt myDomainName.DistributionDomainName
