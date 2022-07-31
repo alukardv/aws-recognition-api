@@ -1,7 +1,6 @@
 import json
 import boto3
 import os
-import uuid
 
 
 def labelOnS3Upload(event, context):
@@ -10,21 +9,23 @@ def labelOnS3Upload(event, context):
     filesUploaded = event['Records']
 
     for file in filesUploaded:
-        fileName = file["s3"]["object"]["key"]
+        blobs_id = file["s3"]["object"]["key"]
         rekognitionClient = boto3.client('rekognition')
-        response = rekognitionClient.detect_labels(Image={'S3Object': {'Bucket': bucket, 'Name': fileName}}, MaxLabels=5)
+        response = rekognitionClient.detect_labels(Image={'S3Object': {'Bucket': bucket, 'Name': blobs_id}}, MaxLabels=5)
+
+        confidence = str(response['Labels'][0].get('Confidence'))
 
         imageLabels = []
-        for label in response['Labels']:
-            imageLabels.append(label["Name"].lower())
+        for label in response['Labels'][0].get('Parents'):
+            imageLabels.append(label['Name'].lower())
 
     dynamodb = boto3.resource('dynamodb')
-    addLabelTablefnc(dynamodb=dynamodb, fileName=fileName, labels=imageLabels)
+    addLabelTablefnc(dynamodb=dynamodb, blobs_id=blobs_id, confidence=confidence, labels=imageLabels)
 
 
-def addLabelTablefnc(dynamodb, fileName, labels):
+def addLabelTablefnc(dynamodb, blobs_id, confidence, labels):
     Table = dynamodb.Table(os.environ['TABLE_NAME'])
-    item = {'fileName': fileName, 'labels': labels}
+    item = {'blobs_id': blobs_id, 'labels': [{'label': 'string', 'confidence': confidence, 'parents': labels}]}
 
     Table.put_item(Item=item)
 

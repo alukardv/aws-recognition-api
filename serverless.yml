@@ -3,9 +3,9 @@ service: aws-recognition-api
 frameworkVersion: '3'
 
 custom:
-  domainName: ${opt:stage, self:provider.stage}.perfsys.cf
-  hosted_zonaID: "Z0836271TEULZNK0FS42"
-  ssl_arn: "arn:aws:acm:us-east-1:670726858704:certificate/c4651d62-e78e-4baf-a533-26bce68df147"
+  domainName: ${opt:stage, self:provider.stage}.${self:provider.environment.DOMAIN_NAME}
+  hosted_zonaID: ${self:provider.environment.HOSTED_ZONAID}
+  ssl_arn: ${self:provider.environment.SSL_ARN}
 
 provider:
   name: aws
@@ -15,6 +15,10 @@ provider:
   environment:
     TABLE_NAME: 'db-label-images'
     BUCKET: 's3-for-images'
+    SNS_NAME: 'sns'
+    DOMAIN_NAME: 'perfsys.cf'
+    HOSTED_ZONAID: "Z0836271TEULZNK0FS42"
+    SSL_ARN: "arn:aws:acm:us-east-1:670726858704:certificate/c4651d62-e78e-4baf-a533-26bce68df147"
     DNS_RECORD: !Join
       - ""
       - - "https://"
@@ -36,10 +40,17 @@ provider:
             - dynamodb:PutItem
             - dynamodb:UpdateItem
             - dynamodb:DeleteItem
+            - dynamodb:ListStreams
+            - dynamodb:DescribeTable
+            - dynamodb:*
           Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/${self:provider.environment.TABLE_NAME}"
         - Effect: "Allow"
           Action:
             - "rekognition:*"
+          Resource: "*"
+        - Effect: "Allow"
+          Action:
+            - "SNS:*"
           Resource: "*"
 
 functions:
@@ -66,6 +77,17 @@ functions:
           path: blobs/{blobs_id}
           method: get
           cors: true
+      - stream:
+          type: dynamodb
+          batchSize: 1
+          startingPosition: LATEST
+          arn:
+            Fn::GetAtt:
+              - DynamoDBTable
+              - StreamArn
+      - sns:
+          arn: !Ref SNSTopic
+          topicName: ${self:provider.environment.SNS_NAME}
 
 resources:
   Resources:
@@ -79,14 +101,16 @@ resources:
       Properties:
         TableName: ${self:provider.environment.TABLE_NAME}
         AttributeDefinitions:
-          - AttributeName: fileName
+          - AttributeName: blobs_id
             AttributeType: S
         KeySchema:
-          - AttributeName: fileName
+          - AttributeName: blobs_id
             KeyType: HASH
         ProvisionedThroughput:
           ReadCapacityUnits: 1
           WriteCapacityUnits: 1
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
 
     myDomainName:
       Type: 'AWS::ApiGateway::DomainName'
@@ -114,3 +138,8 @@ resources:
             AliasTarget:
               HostedZoneId: !GetAtt myDomainName.DistributionHostedZoneId
               DNSName: !GetAtt myDomainName.DistributionDomainName
+
+    SNSTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:provider.environment.SNS_NAME}
