@@ -6,9 +6,11 @@ dynamodb_client = boto3.client("dynamodb")
 client_sns = boto3.resource("sns")
 TABLE_NAME = os.environ["TABLE_NAME"]
 NAME_TOPIC = os.environ["SNS_NAME"]
+DNS_RECORD = os.environ["DNS_RECORD"]
 
 
 def getImagesByLabel(event, context):
+    #print(event)
     try:
         blobs_id = event["pathParameters"]["blobs_id"]
         db_record = dynamodb_client.get_item(
@@ -29,7 +31,6 @@ def getImagesByLabel(event, context):
     except Exception as e:
         result = None
         print(e)
-        #return "error event[pathParameters][blobs_id]"
 
     topic = client_sns.create_topic(Name=NAME_TOPIC)
     try:
@@ -49,6 +50,7 @@ def getImagesByLabel(event, context):
                                       }]}
 
                 print(f"{result_sns} was added")
+
                 publish_message(topic, str(result_sns))
     except Exception as e:
         print(e)

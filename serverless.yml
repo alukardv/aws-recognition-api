@@ -61,6 +61,13 @@ functions:
           path: blobs
           method: post
           cors: true
+  callback_url:
+    handler: scripts/upload-object.callback_url
+    events:
+      - http:
+          path: /{blobs_id}
+          method: post
+          cors: true
 
   processBlob:
     handler: scripts/processBlob.labelOnS3Upload
