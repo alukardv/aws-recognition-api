@@ -2,10 +2,12 @@ import json
 import boto3
 import os
 
+client_sns = boto3.resource("sns")
+NAME_TOPIC = os.environ["SNS_NAME"]
+
 
 def labelOnS3Upload(event, context):
     bucket = os.environ['BUCKET']
-
     filesUploaded = event['Records']
 
     for file in filesUploaded:
@@ -13,19 +15,30 @@ def labelOnS3Upload(event, context):
         rekognitionClient = boto3.client('rekognition')
         response = rekognitionClient.detect_labels(Image={'S3Object': {'Bucket': bucket, 'Name': blobs_id}}, MaxLabels=5)
 
-        confidence = str(response['Labels'][0].get('Confidence'))
+        print(response)
 
         imageLabels = []
-        for label in response['Labels'][0].get('Parents'):
-            imageLabels.append(label['Name'].lower())
+        for label in response['Labels']:
+            imageParents = []
+            for labelP in label['Parents']:
+                imageParents.append(labelP['Name'])
+            imageLabels.append({'label': label['Name'],
+                                'confidence': str(label['Confidence']),
+                                'parents': imageParents})
+
+        print(imageLabels)
 
     dynamodb = boto3.resource('dynamodb')
-    addLabelTablefnc(dynamodb=dynamodb, blobs_id=blobs_id, confidence=confidence, labels=imageLabels)
+    addLabelTablefnc(dynamodb=dynamodb, blobs_id=blobs_id, labels=imageLabels)
+
+    # topic = client_sns.create_topic(Name=NAME_TOPIC)
+    # if not addLabelTablefnc:
+    #     publish_message(topic, str(message))
 
 
-def addLabelTablefnc(dynamodb, blobs_id, confidence, labels):
+def addLabelTablefnc(dynamodb, blobs_id, labels):
     Table = dynamodb.Table(os.environ['TABLE_NAME'])
-    item = {'blobs_id': blobs_id, 'labels': [{'label': 'string', 'confidence': confidence, 'parents': labels}]}
+    item = {'blobs_id': blobs_id, 'labels': labels}
 
     Table.put_item(Item=item)
 
@@ -34,3 +47,9 @@ def addLabelTablefnc(dynamodb, blobs_id, confidence, labels):
         "body": json.dumps(item)
     }
     return response
+
+
+# def publish_message(topic, message):
+#     response = topic.publish(Message=message)
+#     message_id = response['MessageId']
+#     return message_id

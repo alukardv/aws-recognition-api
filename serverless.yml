@@ -61,6 +61,10 @@ functions:
           path: blobs
           method: post
           cors: true
+      - sns:
+          arn: !Ref SNSTopic
+          topicName: ${self:provider.environment.SNS_NAME}
+
   callback_url:
     handler: scripts/upload-object.callback_url
     events:
@@ -92,9 +96,6 @@ functions:
             Fn::GetAtt:
               - DynamoDBTable
               - StreamArn
-      - sns:
-          arn: !Ref SNSTopic
-          topicName: ${self:provider.environment.SNS_NAME}
 
 resources:
   Resources:
