@@ -1,6 +1,7 @@
 import json
 import boto3
 import os
+import http.client
 
 dynamodb_client = boto3.client("dynamodb")
 TABLE_NAME = os.environ["TABLE_NAME"]
@@ -35,28 +36,17 @@ def getImagesByLabel(event, context):
         print(e)
 
     # topic = client_sns.create_topic(Name=NAME_TOPIC)
-    # try:
-    #     for record in event["Records"]:
-    #         if record['eventName'] == 'INSERT':
-    #             print(record['dynamodb']['NewImage'])
-    #             new_record = record['dynamodb']['NewImage']
-    #             parents_sns = []
-    #             for parents_label in new_record.get('labels').get('L')[0].get('M').get('parents').get('L'):
-    #                 parents_sns.append(parents_label['S'])
-    #
-    #             result_sns = {'blobs_id': new_record.get('blobs_id').get('S'),
-    #                       'labels': [{'label': new_record.get('labels').get('L')[0].get('M').get('label').get('S'),
-    #                                   'confidence': new_record.get('labels').get('L')[0].get('M').get('confidence').get(
-    #                                       'S'),
-    #                                   'parents': parents_sns
-    #                                   }]}
-    #
-    #             print(f"{result_sns} was added")
-    #
-    #             publish_message(topic, str(result_sns))
-    # except Exception as e:
-    #     print(e)
-    #     #return "error"
+    try:
+        for record in event["Records"]:
+            if record['eventName'] == 'INSERT':
+                # print(record['dynamodb']['NewImage'])
+                new_record = record['dynamodb']['NewImage']['blobs_id']
+                print(f"{new_record} was added")
+
+                #publish_message(topic, str(result_sns))
+    except Exception as e:
+        print(e)
+        #return "error"
 
     if not result:
         return {"statusCode": 404, "body": json.dumps({"error": "Blob not found"})}

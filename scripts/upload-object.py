@@ -72,31 +72,31 @@ def createBlob(event, context):
     }
 
 
-def subscribe(topic, protocol, endpoint):
-    try:
-        subscription = sns_client.subscribe(
-            TopicArn=topic,
-            Protocol=protocol,
-            Endpoint=endpoint,
-            ReturnSubscriptionArn=True)
-    except ClientError as e:
-        print(e)
-        raise
-    else:
-        return subscription
-
-
-def confirm_subscribe(topic, token):
-    try:
-        confirm1 = sns_client.confirm_subscription(
-            TopicArn=topic,
-            Token=token,
-        )
-    except ClientError as e:
-        print(e)
-        raise
-    else:
-        return confirm1
+# def subscribe(topic, protocol, endpoint):
+#     try:
+#         subscription = sns_client.subscribe(
+#             TopicArn=topic,
+#             Protocol=protocol,
+#             Endpoint=endpoint,
+#             ReturnSubscriptionArn=True)
+#     except ClientError as e:
+#         print(e)
+#         raise
+#     else:
+#         return subscription
+#
+#
+# def confirm_subscribe(topic, token):
+#     try:
+#         confirm1 = sns_client.confirm_subscription(
+#             TopicArn=topic,
+#             Token=token,
+#         )
+#     except ClientError as e:
+#         print(e)
+#         raise
+#     else:
+#         return confirm1
 
 
 # def list_topic_subscriptions(topic_arn):
