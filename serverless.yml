@@ -2,10 +2,8 @@ service: aws-recognition-api
 
 frameworkVersion: '3'
 
-custom:
-  domainName: ${opt:stage, self:provider.stage}.${self:provider.environment.DOMAIN_NAME}
-  hosted_zonaID: ${self:provider.environment.HOSTED_ZONAID}
-  ssl_arn: ${self:provider.environment.SSL_ARN}
+plugins:
+  - serverless-python-requirements
 
 provider:
   name: aws
@@ -15,15 +13,6 @@ provider:
   environment:
     TABLE_NAME: 'db-label-images'
     BUCKET: 's3-for-images'
-    SNS_NAME: 'sns'
-    DOMAIN_NAME: 'perfsys.cf'
-    HOSTED_ZONAID: "Z0836271TEULZNK0FS42"
-    SSL_ARN: "arn:aws:acm:us-east-1:670726858704:certificate/c4651d62-e78e-4baf-a533-26bce68df147"
-    DNS_RECORD: !Join
-      - ""
-      - - "https://"
-        - ${self:custom.domainName}
-        - ""
 
   iam:
     role:
@@ -42,15 +31,10 @@ provider:
             - dynamodb:DeleteItem
             - dynamodb:ListStreams
             - dynamodb:DescribeTable
-            - dynamodb:*
           Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/${self:provider.environment.TABLE_NAME}"
         - Effect: "Allow"
           Action:
             - "rekognition:*"
-          Resource: "*"
-        - Effect: "Allow"
-          Action:
-            - "SNS:*"
           Resource: "*"
 
 functions:
@@ -61,17 +45,14 @@ functions:
           path: blobs
           method: post
           cors: true
-      - sns:
-          arn: !Ref SNSTopic
-          topicName: ${self:provider.environment.SNS_NAME}
-
-  callback_url:
-    handler: scripts/upload-object.callback_url
-    events:
-      - http:
-          path: /{blobs_id}
-          method: post
-          cors: true
+      - stream:
+          type: dynamodb
+          batchSize: 1
+          startingPosition: LATEST
+          arn:
+            Fn::GetAtt:
+              - DynamoDBTable
+              - StreamArn
 
   processBlob:
     handler: scripts/processBlob.labelOnS3Upload
@@ -85,17 +66,17 @@ functions:
     handler: scripts/getLabelImages.getImagesByLabel
     events:
       - http:
-          path: blobs/{blobs_id}
+          path: blobs/{blob_id}
           method: get
           cors: true
-      - stream:
-          type: dynamodb
-          batchSize: 1
-          startingPosition: LATEST
-          arn:
-            Fn::GetAtt:
-              - DynamoDBTable
-              - StreamArn
+
+  test:
+    handler: scripts/test.test
+    events:
+      - http:
+          path: test
+          method: post
+          cors: true
 
 resources:
   Resources:
@@ -109,45 +90,13 @@ resources:
       Properties:
         TableName: ${self:provider.environment.TABLE_NAME}
         AttributeDefinitions:
-          - AttributeName: blobs_id
+          - AttributeName: blob_id
             AttributeType: S
         KeySchema:
-          - AttributeName: blobs_id
+          - AttributeName: blob_id
             KeyType: HASH
         ProvisionedThroughput:
           ReadCapacityUnits: 1
           WriteCapacityUnits: 1
         StreamSpecification:
           StreamViewType: NEW_IMAGE
-
-    myDomainName:
-      Type: 'AWS::ApiGateway::DomainName'
-      Properties:
-        CertificateArn: ${self:custom.ssl_arn}
-        DomainName: ${self:custom.domainName}
-
-    myMapping:
-      Type: 'AWS::ApiGateway::BasePathMapping'
-      DependsOn:
-        - myDomainName
-      Properties:
-        BasePath: ""
-        Stage: ${opt:stage, self:provider.stage}
-        DomainName: ${self:custom.domainName}
-        RestApiId: !Ref ApiGatewayRestApi
-
-    ApiRoute53Record:
-      Type: AWS::Route53::RecordSetGroup
-      Properties:
-        HostedZoneId: ${self:custom.hosted_zonaID}
-        RecordSets:
-          - Name: ${self:custom.domainName}
-            Type: A
-            AliasTarget:
-              HostedZoneId: !GetAtt myDomainName.DistributionHostedZoneId
-              DNSName: !GetAtt myDomainName.DistributionDomainName
-
-    SNSTopic:
-      Type: AWS::SNS::Topic
-      Properties:
-        TopicName: ${self:provider.environment.SNS_NAME}

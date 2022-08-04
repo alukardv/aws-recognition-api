@@ -1,115 +1,65 @@
 import json
 import os
-import http.client
+import requests
 import boto3
 import uuid
 from botocore.config import Config
-from botocore.exceptions import ClientError
 
-NAME_TOPIC = os.environ["SNS_NAME"]
-DNS_RECORD = os.environ["DNS_RECORD"]
+
 BUCKET_NAME = os.environ['BUCKET']
-client_res = boto3.resource("sns")
-sns_client = boto3.client('sns')
-TABLE_NAME = os.environ["TABLE_NAME"]
-dynamodb_client = boto3.client("dynamodb")
-
-
-def callback_url(event, context):
-    print(event)
-    try:
-        blobs_id = event["pathParameters"]["blobs_id"]
-        db_record = dynamodb_client.get_item(
-            TableName=TABLE_NAME,
-            Key={"blobs_id": {"S": blobs_id}}).get('Item')
-
-        imageLabels = []
-        for label in db_record['labels'].get('L'):
-            imageParents = []
-            for labelP in label.get('M').get('parents').get('L'):
-                imageParents.append(labelP.get('S'))
-            imageLabels.append({'label': label.get('M').get('label').get('S'),
-                                'confidence': label.get('M').get('confidence').get('S'),
-                                'parents': imageParents})
-
-        result = {'blobs_id': db_record.get('blobs_id').get('S'),
-                  'labels': imageLabels
-                  }
-
-    except Exception as e:
-        result = None
-        print(e)
-
-    if not result:
-        return {"statusCode": 404, "body": json.dumps({"error": "URL not found"})}
-
-    return {"statusCode": 200, "body": json.dumps(result)}
 
 
 def createBlob(event, context):
     print(event)
+    global callback_url
+    try:
+        callback_url = json.loads(event['body']).get('callback_url')
 
-    callback_url = json.loads(event['body']).get('callback_url')
+        if not callback_url:
+            return {"statusCode": 404, "body": json.dumps({"error": "URL not found"})}
 
-    callback_blobs_id = callback_url[len(DNS_RECORD)+1:]
-    db_record = dynamodb_client.get_item(
-        TableName=TABLE_NAME,
-        Key={"blobs_id": {"S": callback_blobs_id}}).get('Item')
-    print(db_record)
+        s3 = boto3.client("s3", config=Config(signature_version='s3v4'))
+        blob_id = str(uuid.uuid1())
 
-    if not db_record:
-        return {"statusCode": 404, "body": json.dumps({"error": "URL not found"})}
+        upload_url = s3.generate_presigned_url("put_object", Params={"Bucket": BUCKET_NAME, "Key": blob_id}, ExpiresIn=3600)
+    except Exception as e:
+        print(e)
+    else:
+        return {
+            "statusCode": 201,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"blob_id": blob_id, 'callback_url': callback_url, "upload_url": upload_url}),
+        }
 
-    s3 = boto3.client("s3", config=Config(signature_version='s3v4'))
-    blobs_id = str(uuid.uuid1())
+    try:
+        new_record = ''
+        result = ''
+        for record in event["Records"]:
+            if record['eventName'] == 'INSERT':
+                new_record = record['dynamodb']['NewImage']
+                imageLabels = []
+                for label in new_record['labels'].get('L'):
+                    imageParents = []
+                    for labelP in label.get('M').get('parents').get('L'):
+                        imageParents.append(labelP.get('S'))
+                    imageLabels.append({'label': label.get('M').get('label').get('S'),
+                                        'confidence': label.get('M').get('confidence').get('S'),
+                                        'parents': imageParents})
 
-    URL = s3.generate_presigned_url("put_object", Params={"Bucket": BUCKET_NAME, "Key": blobs_id}, ExpiresIn=3600)
+                result = {'blob_id': new_record.get('blob_id').get('S'),
+                          'labels': imageLabels
+                          }
+                print(f"{new_record} was added")
+                print(f"result {result}")
+    except Exception as e:
+        print(e)
+    else:
+        url = callback_url
 
-    return {
-        "statusCode": 201,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({"URL": URL, "blobs_id": blobs_id, 'callback_url': callback_url}),
-    }
+        payload = json.dumps(result)
+        headers = {
+            'Content-Type': 'application/json'
+        }
 
-
-# def subscribe(topic, protocol, endpoint):
-#     try:
-#         subscription = sns_client.subscribe(
-#             TopicArn=topic,
-#             Protocol=protocol,
-#             Endpoint=endpoint,
-#             ReturnSubscriptionArn=True)
-#     except ClientError as e:
-#         print(e)
-#         raise
-#     else:
-#         return subscription
-#
-#
-# def confirm_subscribe(topic, token):
-#     try:
-#         confirm1 = sns_client.confirm_subscription(
-#             TopicArn=topic,
-#             Token=token,
-#         )
-#     except ClientError as e:
-#         print(e)
-#         raise
-#     else:
-#         return confirm1
-
-
-# def list_topic_subscriptions(topic_arn):
-#     try:
-#         paginator = sns_client.get_paginator('list_subscriptions_by_topic')
-#         page_iterator = paginator.paginate(TopicArn=topic_arn,
-#                                            PaginationConfig={'MaxItems': 100})
-#         topic_subscriptions = []
-#         for page in page_iterator:
-#             for subscription in page['Subscriptions']:
-#                 topic_subscriptions.append(subscription)
-#     except ClientError as e:
-#         print(e)
-#         raise
-#     else:
-#         return topic_subscriptions
+        response = requests.request("POST", url, headers=headers, data=payload)
+        print(response)
